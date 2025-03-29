@@ -1,6 +1,6 @@
 ---
-title: "p8106_midterm_project"
-author: "Yujing FU"
+title: "P8106_midterm_project_v1"
+author: "Congyu Yang, Yujing Fu, Zhengkun Ou"
 date: "2025-03-27"
 output: html_document
 ---
@@ -10,13 +10,9 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 ```{r}
-library(tidyverse)
-library(glmnet)
-library(caret)
-library(corrplot)
-library(ggplot2)
-library(plotmo)
-library(ggrepel)
+library(pacman)
+p_load(tidyverse, caret, tidymodels, corrplot, ggplot2, plotmo, ggrepel, patchwork, earth, pdp, mgcv, knitr)
+
 ```
 
 ```{r}
@@ -24,6 +20,9 @@ load("dat1.RData")
 load("dat2.RData")
 ```
 
+```{r}
+str(dat1)
+```
 
 ```{r}
 skimr::skim(dat1)
@@ -41,118 +40,291 @@ dat2 = dat2 |> janitor::clean_names()
 ```
 We can see there is no NA values in the dataset. 
 
+## Convert to the factor variable
+```{r}
+dat1$gender <- factor(dat1$gender, levels = c(0, 1), labels = c("Female", "Male"))
+dat1$race <- factor(dat1$race, levels = c(1, 2, 3, 4), labels = c("White", "Asian", "Black", "Hispanic"))
+dat1$smoking <- factor(dat1$smoking, levels = c(0, 1, 2), labels = c("Never", "Former", "Current"))
+dat1$diabetes <- factor(dat1$diabetes, levels = c(0, 1), labels = c("No", "Yes"))
+dat1$hypertension <- factor(dat1$hypertension, levels = c(0, 1), labels = c("No", "Yes"))
+
+dat2$gender <- factor(dat2$gender, levels = c(0, 1), labels = c("Female", "Male"))
+dat2$race <- factor(dat2$race, levels = c(1, 2, 3, 4), labels = c("White", "Asian", "Black", "Hispanic"))
+dat2$smoking <- factor(dat2$smoking, levels = c(0, 1, 2), labels = c("Never", "Former", "Current"))
+dat2$diabetes <- factor(dat2$diabetes, levels = c(0, 1), labels = c("No", "Yes"))
+dat2$hypertension <- factor(dat2$hypertension, levels = c(0, 1), labels = c("No", "Yes"))
+
+```
+
+```{r}
+str(dat1)
+```
+```{r}
+summary_stats <- summary(dat1)
+print(summary_stats)
+```
+```{r}
+# Check for missing values
+missing_values <- colSums(is.na(dat1))
+print(missing_values)
+```
+There is no missing value in the dataset. 
+
 Check the distribution of the outcome variable in the dataset. 
 ```{r}
-p1 <- ggplot(dat1, aes(x = log_antibody)) +
-  geom_histogram(bins = 30, fill = "skyblue", color = "black") +
-  geom_density(alpha = 0.5, fill = "red") +
-  labs(title = "Distribution of Log-transformed Antibody Levels",
-       x = "Log Antibody Level",
-       y = "Frequency") +
+# Distribution of the response variable
+p1 <- ggplot(dat1, aes(x = log_antibody)) + 
+  geom_histogram(fill = "skyblue", color = "black", bins = 30) +
+  labs(title = "Distribution of Log-Transformed Antibody Levels",
+       x = "Log Antibody Level", y = "Frequency") +
   theme_minimal()
-print(p1)
+p1
 ```
 ```{r}
-p2 <- ggplot(dat1, aes(sample = log_antibody)) +
-  stat_qq() +
-  stat_qq_line() +
-  labs(title = "Q-Q Plot for Log Antibody Levels",
-       x = "Theoretical Quantiles",
-       y = "Sample Quantiles") +
+# Boxplot of log_antibody by gender
+p2 <- ggplot(dat1, aes(x = gender, y = log_antibody, fill = gender)) +
+  geom_boxplot() +
+  labs(title = "Antibody Levels by Gender",
+       x = "Gender", 
+       y = "Log Antibody Level") +
   theme_minimal()
-print(p2)
+p2
+```
+
+```{r}
+# Boxplot of log_antibody by race
+p3 <- ggplot(dat1, aes(x = race, y = log_antibody, fill = race)) +
+  geom_boxplot() +
+  labs(title = "Antibody Levels by Race/Ethnicity",
+       x = "Race/Ethnicity", 
+       y = "Log Antibody Level") +
+  theme_minimal()
+
+```
+
+```{r}
+p4 <- ggplot(dat1, aes(x = smoking, y = log_antibody, fill = smoking)) +
+  geom_boxplot() +
+  labs(title = "Antibody Levels by Smoking Status",
+       x = "Smoking Status", 
+       y = "Log Antibody Level") +
+  theme_minimal()
+
+# Boxplot of log_antibody by diabetes status
+p5 <- ggplot(dat1, aes(x = diabetes, y = log_antibody, fill = diabetes)) +
+  geom_boxplot() +
+  labs(title = "Antibody Levels by Diabetes Status",
+       x = "Diabetes Status", 
+       y = "Log Antibody Level") +
+  theme_minimal()
+```
+
+```{r}
+p2+p3+p4+p5
+```
+```{r}
+# Scatterplot matrix for continuous variables
+continuous_vars <- dat1 %>% 
+  select(age, height, weight, bmi, sbp, ldl, time, log_antibody)
+
+# Calculate correlation matrix
+correlation_matrix <- cor(continuous_vars)
+corrplot(correlation_matrix, method = "circle", type = "upper", 
+         tl.col = "black", tl.srt = 45)
 ```
 
 
 ```{r}
-library(rsample)
-dat1 = na.omit(dat1)
-set.seed(2222)
-data_split = initial_split(dat1, prop = 0.8)
-training_data = training(data_split)
-testing_data = testing(data_split)
+# Create scatterplots for continuous variables vs response
+p6 <- ggplot(dat1, aes(x = age, y = log_antibody)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "loess", color = "red") +
+  labs(title = "Age vs Log Antibody Level", 
+       x = "Age (years)", y = "Log Antibody Level") +
+  theme_minimal()
+
+p7 <- ggplot(dat1, aes(x = bmi, y = log_antibody)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "loess", color = "red") +
+  labs(title = "BMI vs Log Antibody Level", 
+       x = "BMI", y = "Log Antibody Level") +
+  theme_minimal()
+
+p8 <- ggplot(dat1, aes(x = time, y = log_antibody)) +
+  geom_point(alpha = 0.5) +
+  geom_smooth(method = "loess", color = "red") +
+  labs(title = "Time Since Vaccination vs Log Antibody Level", 
+       x = "Time (days)", y = "Log Antibody Level") +
+  theme_minimal()
+```
+```{r}
+p6+p7+p8
+```
+There are some potential nonlinear trend between log_antibody and bmi, and between  log_antibody and time.
+
+# 3. MODEL TRAINING WITH CROSS-VALIDATION ----------------------------------------
+
+# Create formula for modeling
+```{r}
+model_formula <- log_antibody ~ . - id
+
+# Set up cross-validation control
+ctrl <- trainControl(method = "cv", number = 10)
+
+# 3.1 Linear Regression
+set.seed(123)
+lm.fit <- train(
+  model_formula,
+  data = dat1,
+  method = "lm",
+  trControl = ctrl
+)
+print(lm.fit)
+```
+# 3.2 Ridge Regression
+```{r}
+set.seed(123)
+ridge.fit <- train(
+  model_formula,
+  data = dat1,
+  method = "glmnet",
+  tuneGrid = expand.grid(alpha = 0,
+                         lambda = exp(seq(6, -6, length = 100))),
+  trControl = ctrl
+)
+print(ridge.fit)
+print(ridge.fit$bestTune)
+plot(ridge.fit, xTrans = log)
+```
+```{r}
+ridge.fit$bestTune
+```
+# 3.3 Lasso Regression
+```{r}
+set.seed(123)
+lasso.fit <- train(
+  model_formula,
+  data = dat1, 
+  method = "glmnet",
+  tuneGrid = expand.grid(alpha = 1,
+                         lambda = exp(seq(6, -6, length = 100))),
+  trControl = ctrl
+)
+print(lasso.fit)
+print(lasso.fit$bestTune)
+plot(lasso.fit, xTrans = log)
 ```
 
 ```{r}
-x = model.matrix(log_antibody ~ ., data = training_data)[, -1]
-y = training_data[,"log_antibody"]
-corrplot(cor(x), method = "circle", type = "full")
-
-x_test = model.matrix(log_antibody ~ ., data = testing_data)[, -1]
-y_test = testing_data[,"log_antibody"]
+coef(lasso.fit$finalModel, lasso.fit$bestTune$lambda)
 ```
-We can see that there are some collinearity between the variables based on the scatterplot. 
+# 3.4 Elastic Net Regression
+```{r}
+set.seed(123)
+enet.fit <- train(
+  model_formula,
+  data = dat1,
+  method = "glmnet",
+  tuneGrid = expand.grid(alpha = seq(0, 1, length = 21),
+                         lambda = exp(seq(6, -6, length = 100))),
+  trControl = ctrl
+)
+print(enet.fit)
+print(enet.fit$bestTune)
+```
+```{r}
+# Plot elastic net results with different colors for each alpha
+myCol <- rainbow(25)
+myPar <- list(superpose.symbol = list(col = myCol),
+              superpose.line = list(col = myCol))
+plot(enet.fit, par.settings = myPar, xTrans = log)
+
+# Show coefficients of the final Elastic Net model
+coef_enet <- coef(enet.fit$finalModel, enet.fit$bestTune$lambda)
+print(coef_enet)
+```
+```{r}
+coef_enet <- coef(enet.fit$finalModel, enet.fit$bestTune$lambda)
+print(coef_enet)
+```
+## Resamples
+```{r}
+resamp <- resamples(list(
+  Linear_Regression = lm.fit,
+  Ridge = ridge.fit, 
+  Lasso = lasso.fit,
+  Elastic_Net = enet.fit
+))
+summary(resamp)
+```
+```{r}
+parallelplot(resamp, metric = "RMSE")
+bwplot(resamp, metric = "RMSE")
+```
+The RMSE from resampling looks similar to each other. 
 
 ```{r}
-ridge.mod = glmnet(x = x, y = y, alpha = 0, lambda = exp(seq(10, -5, length = 100)))
+# Function to calculate RMSE
+rmse <- function(actual, predicted) {
+  sqrt(mean((actual - predicted)^2))
+}
 ```
 
 ```{r}
-mat.coef = coef(ridge.mod)
-dim(mat.coef)
+# Make predictions using each model
+lm.pred <- predict(lm.fit, newdata = dat2)
+ridge.pred <- predict(ridge.fit, newdata = dat2)
+lasso.pred <- predict(lasso.fit, newdata = dat2)
+enet.pred <- predict(enet.fit, newdata = dat2)
 ```
 
-trace plot
 ```{r}
-plot_glmnet(ridge.mod, xvar = "rlambda", label = 19)
+# Calculate test RMSE for each model
+lm.test.error <- mean((lm.pred - dat2[,"log_antibody"])^2)
+ridge.test.error <- mean((ridge.pred - dat2[,"log_antibody"])^2)
+lasso.test.error <- mean((lasso.pred - dat2[,"log_antibody"])^2)
+enet.test.error <- mean((enet.pred - dat2[,"log_antibody"])^2)
 ```
-We use cross validation to find the optimal value of lambda. The two vertical lines are for minimal MSE and 1SE rule. The 1SE rule gives the most regularized model such that error is within one standard error of the minimum.
+
 ```{r}
-set.seed(2)
-cv.ridge = cv.glmnet(x,y,alpha = 0, lambda = exp(seq(10,-5,length = 100)))
-plot(cv.ridge)
-abline(h = (cv.ridge$cvm + cv.ridge$cvsd)[which.min(cv.ridge$cvm)], col = 4, lwd = 2)
+test_performance <- data.frame(
+  Model = c("Linear Regression", "Ridge Regression", "Lasso Regression", 
+            "Elastic Net Regression"),
+  Test_ERROR = c(lm.test.error, ridge.test.error, lasso.test.error, 
+                enet.test.error)
+)
+print(test_performance)
 ```
+They are very similar to each other. We probably want to choose the Lasso model as it is the simplest model among those four models. 
 
 
 
-## non-linear models
-```{r}
-library(caret)
-library(splines)
-library(mgcv)
-library(pdp)
-library(earth)
-library(tidyverse)
-library(ggplot2)
-```
 ### Smoothing Spline
 We use scatterplot to explore the relationship between the log antibody level and other variables. Time and bmi tend shows potentially nonlinear trend.
 ```{r}
-theme1 <- trellis.par.get()
-theme1$plot.symbol$col <- rgb(.2, .4, .2, .5)
-theme1$plot.symbol$pch <- 16
-theme1$plot.line$col <- rgb(.8, .1, .1, .3)
-theme1$plot.line$lwd <- 2
-theme1$plot.symbol$cex <- 0.1                     
-theme1$strip.background$col <- rgb(.0, .2, .6, .2)
-
-trellis.par.set(theme1)
-# plot excludes categorical variables
-featurePlot(x[, c("age", "height", "weight", "bmi", "sbp", "ldl", "time")], 
-            y, 
-            plot = "scatter", 
-            labels = c("", "Y"), 
-            type = c("p", "smooth"), 
-            layout = c(4, 2))
+x = model.matrix(log_antibody ~ . - id, data = dat1)[, -1]
+y = dat1[,"log_antibody"]
+x_test = model.matrix(log_antibody ~ . - id, data = dat2)[, -1]
+y_test = dat2[,"log_antibody"]
 ```
 
 
 ```{r}
 # choose the best df
-fit.ss = smooth.spline(training_data$bmi, training_data$log_antibody)
+fit.ss = smooth.spline(dat1$bmi, dat1$log_antibody)
 fit.ss$df
 ```
+
+
 ```{r}
 # plot optimal fit
-library(ggplot2)
 bmi.grid = seq(from = 17.5, to = 40, by = 1)
 
 pred.ss = predict(fit.ss, x = bmi.grid)
 pred.ss.df = data.frame(pred = pred.ss$y, bmi = bmi.grid)
 
 
-p = ggplot(training_data, aes(x = bmi, y = log_antibody)) +
+p = ggplot(dat1, aes(x = bmi, y = log_antibody)) +
   geom_point(color = rgb(.2, .4, .2, .5), size = 1) 
   theme_bw()
 
@@ -161,19 +333,18 @@ geom_line(aes(x = bmi, y = pred), data = pred.ss.df,
 color = rgb(.8, .1, .1, 1)) + theme_bw()
 
 ```
+
 ```{r}
 # mse
-pred_ss = predict(fit.ss, x = testing_data$bmi)
+pred_ss = predict(fit.ss, x = dat2$bmi)
 
-mse_ss = mean((testing_data$log_antibody - pred_ss$y)^2)
+mse_ss = mean((dat2$log_antibody - pred_ss$y)^2)
 mse_ss
 ```
 
 
 ### MARS
 ```{r}
-library(earth)
-library(pdp)
 set.seed(2)
 ctrl1 = trainControl(method = "cv", number = 10)
 mars_grid = expand.grid(degree = 1:3, nprune = 2:20)
@@ -182,6 +353,7 @@ trControl = ctrl1)
 ggplot(mars.fit)
 
 ```
+
 ```{r}
 mars.fit$bestTune
 ```
@@ -193,6 +365,7 @@ coef(mars.fit$finalModel)
 ```{r}
 summary(mars.fit$finalModel)
 ```
+
 ```{r}
 # we choose the relatively important variables to draw partial dependence plot
 pdp1 = pdp::partial(mars.fit, pred.var = c("bmi"), grid.resolution = 10) |> autoplot()
@@ -202,6 +375,7 @@ screen = list(z = 20, x = -60))
 gridExtra::grid.arrange(pdp1, pdp2, ncol = 2)
 
 ```
+
 ```{r}
 # test error
 pred_mars = predict(mars.fit, newdata = x_test)
@@ -215,15 +389,16 @@ Test MSE is `r mse_mars`.
 ### GAM
 
 ```{r}
-library(mgcv)
 set.seed(2)
 gam.fit = train(x, y, method = "gam", trControl = ctrl1)
 
 summary(gam.fit)
 ```
+
 ```{r}
 gam.fit$bestTune
 ```
+
 ```{r}
 gam.fit$finalModel
 ```
@@ -248,22 +423,17 @@ summary(comparison)
 # MSE comparison
 
 test_mse_table = data.frame(
-  Model = c("Smoothing Spline", "MARS", "GAM"),
-  MSE = c(mse_ss, mse_mars, mse_gam)
-)
+  Model = c("Linear Regression", "Ridge Regression", "Lasso Regression", 
+            "Elastic Net Regression","Smoothing Spline", "MARS", "GAM"),
+  MSE = c(lm.test.error,ridge.test.error,
+          lasso.test.error, mse_ss, enet.test.error, 
+          mse_mars, mse_gam)
+) |> arrange(MSE)
 
-
-library(knitr)
-kable(test_mse_table)
+kable(test_mse_table, sort = TRUE)
 
 ```
 
 
 The best prediction model is ....
-
-## The robustness and generalizability of our best prediction model using the new dataset
-
-```{r}
-
-```
 
