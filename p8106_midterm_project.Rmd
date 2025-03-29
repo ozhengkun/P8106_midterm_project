@@ -2,8 +2,11 @@
 title: "P8106_midterm_project_v1"
 author: "Congyu Yang, Yujing Fu, Zhengkun Ou"
 date: "2025-03-27"
-output: html_document
+output:
+  pdf_document:
+    latex_engine: xelatex
 ---
+
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
