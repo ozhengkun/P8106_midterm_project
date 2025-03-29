@@ -1,0 +1,269 @@
+---
+title: "p8106_midterm_project"
+author: "Yujing FU"
+date: "2025-03-27"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+library(glmnet)
+library(caret)
+library(corrplot)
+library(ggplot2)
+library(plotmo)
+library(ggrepel)
+```
+
+```{r}
+load("dat1.RData")
+load("dat2.RData")
+```
+
+
+```{r}
+skimr::skim(dat1)
+skimr::skim(dat2)
+```
+There is no missing value in this dataset. 
+
+```{r}
+colnames(dat1)
+```
+
+```{r}
+dat1 = dat1 |> janitor::clean_names()
+dat2 = dat2 |> janitor::clean_names()
+```
+We can see there is no NA values in the dataset. 
+
+Check the distribution of the outcome variable in the dataset. 
+```{r}
+p1 <- ggplot(dat1, aes(x = log_antibody)) +
+  geom_histogram(bins = 30, fill = "skyblue", color = "black") +
+  geom_density(alpha = 0.5, fill = "red") +
+  labs(title = "Distribution of Log-transformed Antibody Levels",
+       x = "Log Antibody Level",
+       y = "Frequency") +
+  theme_minimal()
+print(p1)
+```
+```{r}
+p2 <- ggplot(dat1, aes(sample = log_antibody)) +
+  stat_qq() +
+  stat_qq_line() +
+  labs(title = "Q-Q Plot for Log Antibody Levels",
+       x = "Theoretical Quantiles",
+       y = "Sample Quantiles") +
+  theme_minimal()
+print(p2)
+```
+
+
+```{r}
+library(rsample)
+dat1 = na.omit(dat1)
+set.seed(2222)
+data_split = initial_split(dat1, prop = 0.8)
+training_data = training(data_split)
+testing_data = testing(data_split)
+```
+
+```{r}
+x = model.matrix(log_antibody ~ ., data = training_data)[, -1]
+y = training_data[,"log_antibody"]
+corrplot(cor(x), method = "circle", type = "full")
+
+x_test = model.matrix(log_antibody ~ ., data = testing_data)[, -1]
+y_test = testing_data[,"log_antibody"]
+```
+We can see that there are some collinearity between the variables based on the scatterplot. 
+
+```{r}
+ridge.mod = glmnet(x = x, y = y, alpha = 0, lambda = exp(seq(10, -5, length = 100)))
+```
+
+```{r}
+mat.coef = coef(ridge.mod)
+dim(mat.coef)
+```
+
+trace plot
+```{r}
+plot_glmnet(ridge.mod, xvar = "rlambda", label = 19)
+```
+We use cross validation to find the optimal value of lambda. The two vertical lines are for minimal MSE and 1SE rule. The 1SE rule gives the most regularized model such that error is within one standard error of the minimum.
+```{r}
+set.seed(2)
+cv.ridge = cv.glmnet(x,y,alpha = 0, lambda = exp(seq(10,-5,length = 100)))
+plot(cv.ridge)
+abline(h = (cv.ridge$cvm + cv.ridge$cvsd)[which.min(cv.ridge$cvm)], col = 4, lwd = 2)
+```
+
+
+
+## non-linear models
+```{r}
+library(caret)
+library(splines)
+library(mgcv)
+library(pdp)
+library(earth)
+library(tidyverse)
+library(ggplot2)
+```
+### Smoothing Spline
+We use scatterplot to explore the relationship between the log antibody level and other variables. Time and bmi tend shows potentially nonlinear trend.
+```{r}
+theme1 <- trellis.par.get()
+theme1$plot.symbol$col <- rgb(.2, .4, .2, .5)
+theme1$plot.symbol$pch <- 16
+theme1$plot.line$col <- rgb(.8, .1, .1, .3)
+theme1$plot.line$lwd <- 2
+theme1$plot.symbol$cex <- 0.1                     
+theme1$strip.background$col <- rgb(.0, .2, .6, .2)
+
+trellis.par.set(theme1)
+# plot excludes categorical variables
+featurePlot(x[, c("age", "height", "weight", "bmi", "sbp", "ldl", "time")], 
+            y, 
+            plot = "scatter", 
+            labels = c("", "Y"), 
+            type = c("p", "smooth"), 
+            layout = c(4, 2))
+```
+
+
+```{r}
+# choose the best df
+fit.ss = smooth.spline(training_data$bmi, training_data$log_antibody)
+fit.ss$df
+```
+```{r}
+# plot optimal fit
+library(ggplot2)
+bmi.grid = seq(from = 17.5, to = 40, by = 1)
+
+pred.ss = predict(fit.ss, x = bmi.grid)
+pred.ss.df = data.frame(pred = pred.ss$y, bmi = bmi.grid)
+
+
+p = ggplot(training_data, aes(x = bmi, y = log_antibody)) +
+  geom_point(color = rgb(.2, .4, .2, .5), size = 1) 
+  theme_bw()
+
+p +
+geom_line(aes(x = bmi, y = pred), data = pred.ss.df,
+color = rgb(.8, .1, .1, 1)) + theme_bw()
+
+```
+```{r}
+# mse
+pred_ss = predict(fit.ss, x = testing_data$bmi)
+
+mse_ss = mean((testing_data$log_antibody - pred_ss$y)^2)
+mse_ss
+```
+
+
+### MARS
+```{r}
+library(earth)
+library(pdp)
+set.seed(2)
+ctrl1 = trainControl(method = "cv", number = 10)
+mars_grid = expand.grid(degree = 1:3, nprune = 2:20)
+mars.fit = train(x, y, method = "earth", tuneGrid = mars_grid,
+trControl = ctrl1)
+ggplot(mars.fit)
+
+```
+```{r}
+mars.fit$bestTune
+```
+
+```{r}
+coef(mars.fit$finalModel)
+```
+
+```{r}
+summary(mars.fit$finalModel)
+```
+```{r}
+# we choose the relatively important variables to draw partial dependence plot
+pdp1 = pdp::partial(mars.fit, pred.var = c("bmi"), grid.resolution = 10) |> autoplot()
+pdp2 <- pdp::partial(mars.fit, pred.var = c("bmi", "time"), grid.resolution = 10) |>
+pdp::plotPartial(levelplot = FALSE, zlab = "log antibody", drape = TRUE,
+screen = list(z = 20, x = -60))
+gridExtra::grid.arrange(pdp1, pdp2, ncol = 2)
+
+```
+```{r}
+# test error
+pred_mars = predict(mars.fit, newdata = x_test)
+
+mse_mars = mean((y_test - pred_mars)^2)
+mse_mars
+```
+Test MSE is `r mse_mars`.
+
+
+### GAM
+
+```{r}
+library(mgcv)
+set.seed(2)
+gam.fit = train(x, y, method = "gam", trControl = ctrl1)
+
+summary(gam.fit)
+```
+```{r}
+gam.fit$bestTune
+```
+```{r}
+gam.fit$finalModel
+```
+
+
+```{r}
+pred_gam = predict(gam.fit, newdata = x_test)
+mse_gam = mean((y_test - pred_gam)^2)
+mse_gam
+```
+
+Test MSE for GAM model is `r mse_gam` 
+
+## Comparison between linear and non-linear model using test error
+```{r}
+comparison = resamples(list(MARS = mars.fit, GAM = gam.fit))
+summary(comparison)
+```
+
+
+```{r}
+# MSE comparison
+
+test_mse_table = data.frame(
+  Model = c("Smoothing Spline", "MARS", "GAM"),
+  MSE = c(mse_ss, mse_mars, mse_gam)
+)
+
+
+library(knitr)
+kable(test_mse_table)
+
+```
+
+
+The best prediction model is ....
+
+## The robustness and generalizability of our best prediction model using the new dataset
+
+```{r}
+
+```
+
