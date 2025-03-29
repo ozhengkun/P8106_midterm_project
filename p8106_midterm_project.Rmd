@@ -6,7 +6,8 @@ output: html_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+
 ```
 
 ```{r}
@@ -14,14 +15,10 @@ library(pacman)
 p_load(tidyverse, caret, tidymodels, corrplot, ggplot2, plotmo, ggrepel, patchwork, earth, pdp, mgcv, knitr)
 
 ```
-
+## 1. Data Processing
 ```{r}
 load("dat1.RData")
 load("dat2.RData")
-```
-
-```{r}
-str(dat1)
 ```
 
 ```{r}
@@ -35,13 +32,14 @@ colnames(dat1)
 ```
 
 ```{r}
+# Clean variable names
 dat1 = dat1 |> janitor::clean_names()
 dat2 = dat2 |> janitor::clean_names()
 ```
 We can see there is no NA values in the dataset. 
 
-## Convert to the factor variable
 ```{r}
+# Convert variables to factors
 dat1$gender <- factor(dat1$gender, levels = c(0, 1), labels = c("Female", "Male"))
 dat1$race <- factor(dat1$race, levels = c(1, 2, 3, 4), labels = c("White", "Asian", "Black", "Hispanic"))
 dat1$smoking <- factor(dat1$smoking, levels = c(0, 1, 2), labels = c("Never", "Former", "Current"))
@@ -56,13 +54,13 @@ dat2$hypertension <- factor(dat2$hypertension, levels = c(0, 1), labels = c("No"
 
 ```
 
+
 ```{r}
-str(dat1)
-```
-```{r}
+# Summary statistics
 summary_stats <- summary(dat1)
 print(summary_stats)
 ```
+
 ```{r}
 # Check for missing values
 missing_values <- colSums(is.na(dat1))
@@ -70,7 +68,8 @@ print(missing_values)
 ```
 There is no missing value in the dataset. 
 
-Check the distribution of the outcome variable in the dataset. 
+## 2. Exploratory Data Analysis (EDA)
+### 2.1 Distribution of log antibody
 ```{r}
 # Distribution of the response variable
 p1 <- ggplot(dat1, aes(x = log_antibody)) + 
@@ -80,6 +79,8 @@ p1 <- ggplot(dat1, aes(x = log_antibody)) +
   theme_minimal()
 p1
 ```
+
+### 2.2 Boxplot of log antibody
 ```{r}
 # Boxplot of log_antibody by gender
 p2 <- ggplot(dat1, aes(x = gender, y = log_antibody, fill = gender)) +
@@ -88,10 +89,7 @@ p2 <- ggplot(dat1, aes(x = gender, y = log_antibody, fill = gender)) +
        x = "Gender", 
        y = "Log Antibody Level") +
   theme_minimal()
-p2
-```
 
-```{r}
 # Boxplot of log_antibody by race
 p3 <- ggplot(dat1, aes(x = race, y = log_antibody, fill = race)) +
   geom_boxplot() +
@@ -100,9 +98,7 @@ p3 <- ggplot(dat1, aes(x = race, y = log_antibody, fill = race)) +
        y = "Log Antibody Level") +
   theme_minimal()
 
-```
-
-```{r}
+# Boxplot of log_antibody by smoking status
 p4 <- ggplot(dat1, aes(x = smoking, y = log_antibody, fill = smoking)) +
   geom_boxplot() +
   labs(title = "Antibody Levels by Smoking Status",
@@ -119,9 +115,13 @@ p5 <- ggplot(dat1, aes(x = diabetes, y = log_antibody, fill = diabetes)) +
   theme_minimal()
 ```
 
+
 ```{r}
 p2+p3+p4+p5
 ```
+
+
+### 2.3 Correlation Plot
 ```{r}
 # Scatterplot matrix for continuous variables
 continuous_vars <- dat1 %>% 
@@ -133,7 +133,7 @@ corrplot(correlation_matrix, method = "circle", type = "upper",
          tl.col = "black", tl.srt = 45)
 ```
 
-
+### 2.4 Scatterplots
 ```{r}
 # Create scatterplots for continuous variables vs response
 p6 <- ggplot(dat1, aes(x = age, y = log_antibody)) +
@@ -162,9 +162,9 @@ p6+p7+p8
 ```
 There are some potential nonlinear trend between log_antibody and bmi, and between  log_antibody and time.
 
-# 3. MODEL TRAINING WITH CROSS-VALIDATION ----------------------------------------
-
-# Create formula for modeling
+## 3. Model Training with Cross-validation 
+### 3.1 Linear models
+#### 3.1.1 Linear regression
 ```{r}
 model_formula <- log_antibody ~ . - id
 
@@ -179,9 +179,10 @@ lm.fit <- train(
   method = "lm",
   trControl = ctrl
 )
-print(lm.fit)
+summary(lm.fit$finalModel)
 ```
-# 3.2 Ridge Regression
+
+#### 3.1.2 Ridge Regression
 ```{r}
 set.seed(123)
 ridge.fit <- train(
@@ -192,14 +193,14 @@ ridge.fit <- train(
                          lambda = exp(seq(6, -6, length = 100))),
   trControl = ctrl
 )
-print(ridge.fit)
+
+coef(ridge.fit$finalModel, s = ridge.fit$bestTune$lambda)
+
 print(ridge.fit$bestTune)
 plot(ridge.fit, xTrans = log)
 ```
-```{r}
-ridge.fit$bestTune
-```
-# 3.3 Lasso Regression
+
+#### 3.1.3 Lasso Regression
 ```{r}
 set.seed(123)
 lasso.fit <- train(
@@ -210,15 +211,15 @@ lasso.fit <- train(
                          lambda = exp(seq(6, -6, length = 100))),
   trControl = ctrl
 )
-print(lasso.fit)
+
+coef(lasso.fit$finalModel, lasso.fit$bestTune$lambda)
 print(lasso.fit$bestTune)
 plot(lasso.fit, xTrans = log)
 ```
 
-```{r}
-coef(lasso.fit$finalModel, lasso.fit$bestTune$lambda)
-```
-# 3.4 Elastic Net Regression
+
+
+#### 3.1.4 Elastic Net Regression
 ```{r}
 set.seed(123)
 enet.fit <- train(
@@ -229,9 +230,10 @@ enet.fit <- train(
                          lambda = exp(seq(6, -6, length = 100))),
   trControl = ctrl
 )
-print(enet.fit)
+summary(enet.fit)
 print(enet.fit$bestTune)
 ```
+
 ```{r}
 # Plot elastic net results with different colors for each alpha
 myCol <- rainbow(25)
@@ -247,7 +249,8 @@ print(coef_enet)
 coef_enet <- coef(enet.fit$finalModel, enet.fit$bestTune$lambda)
 print(coef_enet)
 ```
-## Resamples
+
+#### 3.1.5 Model Comparison (resampling)
 ```{r}
 resamp <- resamples(list(
   Linear_Regression = lm.fit,
@@ -263,6 +266,7 @@ bwplot(resamp, metric = "RMSE")
 ```
 The RMSE from resampling looks similar to each other. 
 
+#### 3.1.6 Test Set Performance
 ```{r}
 # Function to calculate RMSE
 rmse <- function(actual, predicted) {
@@ -279,7 +283,7 @@ enet.pred <- predict(enet.fit, newdata = dat2)
 ```
 
 ```{r}
-# Calculate test RMSE for each model
+# Calculate test MSE for each model
 lm.test.error <- mean((lm.pred - dat2[,"log_antibody"])^2)
 ridge.test.error <- mean((ridge.pred - dat2[,"log_antibody"])^2)
 lasso.test.error <- mean((lasso.pred - dat2[,"log_antibody"])^2)
@@ -297,9 +301,9 @@ print(test_performance)
 ```
 They are very similar to each other. We probably want to choose the Lasso model as it is the simplest model among those four models. 
 
+### 3.2 Non-linear Models
 
-
-### Smoothing Spline
+#### 3.2.1 Smoothing Spline
 We use scatterplot to explore the relationship between the log antibody level and other variables. Time and bmi tend shows potentially nonlinear trend.
 ```{r}
 x = model.matrix(log_antibody ~ . - id, data = dat1)[, -1]
@@ -313,6 +317,8 @@ y_test = dat2[,"log_antibody"]
 # choose the best df
 fit.ss = smooth.spline(dat1$bmi, dat1$log_antibody)
 fit.ss$df
+print(fit.ss)
+
 ```
 
 
@@ -325,8 +331,7 @@ pred.ss.df = data.frame(pred = pred.ss$y, bmi = bmi.grid)
 
 
 p = ggplot(dat1, aes(x = bmi, y = log_antibody)) +
-  geom_point(color = rgb(.2, .4, .2, .5), size = 1) 
-  theme_bw()
+  geom_point(color = rgb(.2, .4, .2, .5), size = 1) + theme_bw()
 
 p +
 geom_line(aes(x = bmi, y = pred), data = pred.ss.df,
@@ -334,16 +339,8 @@ color = rgb(.8, .1, .1, 1)) + theme_bw()
 
 ```
 
-```{r}
-# mse
-pred_ss = predict(fit.ss, x = dat2$bmi)
 
-mse_ss = mean((dat2$log_antibody - pred_ss$y)^2)
-mse_ss
-```
-
-
-### MARS
+#### 3.2.2 Multivariate Adaptive Regression Splines (MARS)
 ```{r}
 set.seed(2)
 ctrl1 = trainControl(method = "cv", number = 10)
@@ -376,18 +373,8 @@ gridExtra::grid.arrange(pdp1, pdp2, ncol = 2)
 
 ```
 
-```{r}
-# test error
-pred_mars = predict(mars.fit, newdata = x_test)
 
-mse_mars = mean((y_test - pred_mars)^2)
-mse_mars
-```
-Test MSE is `r mse_mars`.
-
-
-### GAM
-
+#### 3.2.3 Generalized Additive Model (GAM)
 ```{r}
 set.seed(2)
 gam.fit = train(x, y, method = "gam", trControl = ctrl1)
@@ -404,21 +391,32 @@ gam.fit$finalModel
 ```
 
 
-```{r}
-pred_gam = predict(gam.fit, newdata = x_test)
-mse_gam = mean((y_test - pred_gam)^2)
-mse_gam
-```
 
-Test MSE for GAM model is `r mse_gam` 
-
-## Comparison between linear and non-linear model using test error
+#### 3.2.4 Model Comparison (resampling)
 ```{r}
 comparison = resamples(list(MARS = mars.fit, GAM = gam.fit))
 summary(comparison)
+
 ```
 
+#### 3.1.6 Test Set Performance
+```{r}
+# Make predictions using each mode
+pred_ss = predict(fit.ss, x = dat2$bmi)
+pred_mars = predict(mars.fit, newdata = x_test)
+pred_gam = predict(gam.fit, newdata = x_test)
 
+mse_ss = mean((dat2$log_antibody - pred_ss$y)^2)
+mse_mars = mean((y_test - pred_mars)^2)
+mse_gam = mean((y_test - pred_gam)^2)
+
+test_performance_non_linear <- data.frame(
+  Model = c("Smoothing Spline", "MARS", "GAM"),
+  Test_ERROR = c(mse_ss, mse_mars, mse_gam)
+)
+print(test_performance_non_linear)
+```
+### 4. Model Comparison between Linear and non-linear Models
 ```{r}
 # MSE comparison
 
@@ -435,5 +433,5 @@ kable(test_mse_table, sort = TRUE)
 ```
 
 
-The best prediction model is ....
+The best model is the MARS model with the smallest test error.
 
