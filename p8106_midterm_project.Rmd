@@ -9,7 +9,14 @@ output:
 
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+knitr::opts_chunk$set(
+  echo = TRUE,
+  warning = FALSE,
+  message = FALSE,
+  fig.width = 6,
+  fig.asp = 0.6,
+  out.width = "90%"
+)
 
 ```
 
@@ -307,13 +314,34 @@ They are very similar to each other. We probably want to choose the Lasso model 
 ### 3.2 Non-linear Models
 
 #### 3.2.1 Smoothing Spline
-We use scatterplot to explore the relationship between the log antibody level and other variables. Time and bmi tend shows potentially nonlinear trend.
+We use scatterplot to explore the relationship between the log antibody level and other continuous variables. Time and bmi tend shows potentially nonlinear trend.
 ```{r}
 x = model.matrix(log_antibody ~ . - id, data = dat1)[, -1]
 y = dat1[,"log_antibody"]
 x_test = model.matrix(log_antibody ~ . - id, data = dat2)[, -1]
 y_test = dat2[,"log_antibody"]
 ```
+
+```{r}
+theme1 <- trellis.par.get()
+theme1$plot.symbol$col <- rgb(.2, .4, .2, .5)
+theme1$plot.symbol$pch <- 16
+theme1$plot.symbol$cex <- 0.2
+theme1$plot.line$col <- rgb(.8, .1, .1, 0.3)
+theme1$plot.line$lwd <- 2
+theme1$strip.background$col <- rgb(.0, .2, .6, .2)
+# Set the modified parameters as the global style for the trellis graph
+trellis.par.set(theme1)
+# svi and gleason were not included in the plot (they take discrete values)
+featurePlot(x[, c("age", "height", "weight", "bmi", "sbp", "ldl", "time")], 
+            y, 
+            plot = "scatter", 
+            labels = c("", "Log Antibody"),
+            type = c("p", "smooth"), 
+            layout = c(4, 2))
+
+```
+
 
 
 ```{r}
@@ -341,11 +369,11 @@ geom_line(aes(x = bmi, y = pred), data = pred.ss.df,
 color = rgb(.8, .1, .1, 1)) + theme_bw()
 
 ```
-
+The scatter plot shows a weak non-linear relationship between BMI and log-transformed antibody levels. A smooth spline with an effective degree of freedom of approximately 5.77 was fitted. The trend suggests that antibody levels tend to be higher for individuals with BMI in the range of 25–28 and slightly decrease for higher BMI. 
 
 #### 3.2.2 Multivariate Adaptive Regression Splines (MARS)
 ```{r}
-set.seed(2)
+set.seed(123)
 ctrl1 = trainControl(method = "cv", number = 10)
 mars_grid = expand.grid(degree = 1:3, nprune = 2:20)
 mars.fit = train(x, y, method = "earth", tuneGrid = mars_grid,
@@ -365,13 +393,20 @@ coef(mars.fit$finalModel)
 ```{r}
 summary(mars.fit$finalModel)
 ```
+We fitted a MARS model with 10-fold cross-validation. The optimal model selected 9 basis functions with degree 1 (additive model). Among 15 candidate predictors, 5 variables were retained (bmi, gender, time, age, and smoking). The fitted model explained approximately 22% of the variation in log-transformed antibody levels. The model identified several meaningful breakpoints such as bmi = 23.7 and bmi = 27.8, suggesting non-linear relationships. For example, BMI showed a negative effect on antibody levels when exceeding 23.7, and males had lower antibody levels compared to females.
 
 ```{r}
 # we choose the relatively important variables to draw partial dependence plot
-pdp1 = pdp::partial(mars.fit, pred.var = c("bmi"), grid.resolution = 10) |> autoplot()
-pdp2 <- pdp::partial(mars.fit, pred.var = c("bmi", "time"), grid.resolution = 10) |>
-pdp::plotPartial(levelplot = FALSE, zlab = "log antibody", drape = TRUE,
-screen = list(z = 20, x = -60))
+pdp1 = pdp::partial(mars.fit, pred.var = c("bmi"), grid.resolution = 10) |>
+  autoplot() +
+  ylab("Estimated log antibody") + 
+  xlab("bmi") + 
+  theme_bw()
+
+pdp2 = pdp::partial(mars.fit, pred.var = c("bmi", "time"), grid.resolution = 10) |>
+  pdp::plotPartial(levelplot = FALSE,
+                   zlab = "Estimated\nlog antibody",
+                   drape = TRUE)  
 gridExtra::grid.arrange(pdp1, pdp2, ncol = 2)
 
 ```
@@ -379,7 +414,7 @@ gridExtra::grid.arrange(pdp1, pdp2, ncol = 2)
 
 #### 3.2.3 Generalized Additive Model (GAM)
 ```{r}
-set.seed(2)
+set.seed(123)
 gam.fit = train(x, y, method = "gam", trControl = ctrl1)
 
 summary(gam.fit)
@@ -392,14 +427,21 @@ gam.fit$bestTune
 ```{r}
 gam.fit$finalModel
 ```
-
+A Generalized Additive Model (GAM) with Gaussian distribution and identity link was fitted. The model included both parametric terms and smooth terms. Among parametric terms, male gender and current smoking status were significantly associated with lower log-transformed antibody levels. Smooth terms indicated non-linear effects of age (edf ≈1), BMI (edf ≈4.18), and time since vaccination (edf ≈7.89) on antibody levels, all statistically significant (p < 0.001). Variables such as SBP, LDL, and weight showed non-significant effects. The model explained approximately 22% of the variability in log-transformed antibody levels.
 
 
 #### 3.2.4 Model Comparison (resampling)
 ```{r}
-comparison = resamples(list(MARS = mars.fit, GAM = gam.fit))
-summary(comparison)
-
+resamp_non_linear <- resamples(list(
+  MARS = mars.fit, 
+  GAM = gam.fit
+))
+summary(resamp_non_linear)
+```
+```{r}
+parallelplot(resamp_non_linear, metric = "RMSE")
+bwplot(resamp_non_linear, metric = "RMSE")
+```
 ```
 
 #### 3.1.6 Test Set Performance
